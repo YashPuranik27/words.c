@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <ctype.h>
 
 typedef struct {
     char *word;
@@ -14,6 +15,28 @@ typedef struct {
 
 WordCount *words = NULL;
 int num_words = 0;
+
+int is_valid_char(char c) {
+    return isalpha((unsigned char)c) || c == '\'' || c == '-';
+}
+
+// This should determine if the character is a word separator
+int is_separator(char c) {
+    return !isalpha((unsigned char)c) && c != '\'' && c != '-';
+}
+
+// This should check if a character is a valid hyphen within a word
+int is_valid_hyphen(char prev, char next) {
+    return isalpha((unsigned char)prev) && isalpha((unsigned char)next);
+}
+
+// This is a helper function to check if a character is a letter, an apostrophe, or a valid hyphen
+int is_word_char(char prev, char c, char next) {
+    if (isalpha((unsigned char)c)) return 1;
+    if (c == '\'') return 1;
+    if (c == '-' && isalpha((unsigned char)prev) && isalpha((unsigned char)next)) return 1;
+    return 0;
+}
 
 void insert_word(char *word) {
     for (int i = 0; i < num_words; i++) {
@@ -36,24 +59,64 @@ int cmp(const void *a, const void *b) {
     return strcmp(wa->word, wb->word);
 }
 
+// This is a function to process a file and count the words according to the given rules
 void process_file(char *filename) {
     int fd = open(filename, O_RDONLY);
     if (fd < 0) return;
 
     struct stat st;
-    fstat(fd, &st);
-    char *buffer = malloc(st.st_size + 1);
-    read(fd, buffer, st.st_size);
-    buffer[st.st_size] = '\0';
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return;
+    }
+
+    char *buffer = (char *)malloc(st.st_size + 1);
+    ssize_t bytes_read = read(fd, buffer, st.st_size);
+    if (bytes_read != st.st_size) {
+        close(fd);
+        free(buffer);
+        return;
+    }
+    buffer[bytes_read] = '\0';
     close(fd);
 
-    char *token = strtok(buffer, " \n\r\t");
-    while (token) {
-        insert_word(token);
-        token = strtok(NULL, " \n\r\t");
+    char *p = buffer;
+    char *word_start = NULL;
+while (*p) {
+    // If it's an alpha character, or an apostrophe followed by an alpha, potentially part of a word
+    if (isalpha((unsigned char)*p) || (*p == '\'' && isalpha((unsigned char)*(p + 1)))) {
+        if (!word_start) {
+            word_start = p; // Start of a new word
+        }
+    } else if (*p == '-' && word_start) {
+        // Check if it's a valid hyphen (surrounded by letters)
+        if (is_valid_hyphen(*(p - 1), *(p + 1))) {
+            // It's a valid hyphen, continue the word
+        } else {
+            // It's not a valid hyphen, end the current word
+            *p = '\0';
+            insert_word(word_start);
+            word_start = NULL;
+        }
+    } else {
+        // If we've started a word, it's now time to end it
+        if (word_start) {
+            *p = '\0';
+            insert_word(word_start);
+            word_start = NULL;
+        }
     }
+    p++;
+}
+
+    // This handles the last word in the buffer, if there is one
+    if (word_start) {
+        insert_word(word_start);
+    }
+
     free(buffer);
 }
+
 
 void process_directory(char *dirname) {
     DIR *dir = opendir(dirname);
