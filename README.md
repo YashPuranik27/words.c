@@ -1,4 +1,4 @@
-# cs214Assignment2
+# words.c
 
 compile code with $ gcc -Wall -o words words.c
 
